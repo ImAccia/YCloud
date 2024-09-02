@@ -42,7 +42,6 @@ class DataHandler:
 
         self.zip_all_files_in_folder()
         colors = self.file_to_color()
-        # self.create_video_from_colors(colors)
         self.stdscr.getch()
 
     def zip_all_files_in_folder(self):
@@ -73,16 +72,15 @@ class DataHandler:
         colors = []
         frame_counter = 0
 
-        # Preparazione video
         fourcc = cv2.VideoWriter_fourcc(*'mp4v')
         out = cv2.VideoWriter(self.video_out, fourcc, self.fps, (self.width, self.height), isColor=bool(self.rgb))
 
+        buffer_size = 1024
         with open(self.out, 'rb') as file:
-            progress = 1
+            progress = 0
             while True:
-                byte = file.read(1)
-                m.set_string(self.stdscr, 4, 0, f"Progress: {progress}/{file_size} - {round((progress/file_size)*100, 1)}%")
-                if not byte:
+                buffer = file.read(buffer_size)
+                if not buffer:
                     if colors:
                         frame = self.create_frame(iter(colors))
                         frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR) if self.rgb else frame
@@ -90,42 +88,29 @@ class DataHandler:
                     m.set_string(self.stdscr, 4, 0, "Finished converting", colorCode=2)
                     break
 
-                bits = f"{ord(byte):08b}"
-                progress += 1
+                for i in range(0, len(buffer), 3 if self.rgb else 1):
+                    if self.rgb:
+                        r = buffer[i]
+                        g = buffer[i + 1] if i + 1 < len(buffer) else 0
+                        b = buffer[i + 2] if i + 2 < len(buffer) else 0
+                        colors.extend([[r, g, b]])
+                    else:
+                        bits = f"{buffer[i]:08b}"
+                        colors.extend([255 if bit == '1' else 0 for bit in bits])
 
-                if self.rgb:
-                    r = int(bits, 2)
-
-                    byte = file.read(1)
-                    progress += 1
-                    if not byte:
-                        break
-                    bits = f"{ord(byte):08b}"
-                    g = int(bits, 2)
-
-                    byte = file.read(1)
-                    progress += 1
-                    if not byte:
-                        break
-                    bits = f"{ord(byte):08b}"
-                    b = int(bits, 2)
-
-                    colors.extend([[r, g, b]])
-                else:
-                    colors.extend([255 if bit == '1' else 0 for bit in bits])
-
-                if len(colors) >= (self.width * self.height) // (self.block_size * self.block_size):
-                    frame = self.create_frame(iter(colors))
-                    frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR) if self.rgb else frame
-                    out.write(frame)
-                    frame_counter += 1
-                    m.set_string(self.stdscr, 5, 0, f"Saved frame {frame_counter}")
-                    colors = []
-
+                    if len(colors) >= (self.width * self.height) // (self.block_size * self.block_size):
+                        frame = self.create_frame(iter(colors))
+                        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR) if self.rgb else frame
+                        out.write(frame)
+                        frame_counter += 1
+                        m.set_string(self.stdscr, 5, 0, f"Saved frame {frame_counter}")
+                        colors = []
+                
+                progress += len(buffer)
+                m.set_string(self.stdscr, 4, 0, f"Progress: {progress}/{file_size} - {round((progress/file_size)*100, 1)}%")
+        
         out.release()
         m.set_string(self.stdscr, 6, 0, f"Video saved as {self.video_out}", colorCode=2)
-
-
 
     def create_frame(self, bitstream):
         frame = np.zeros((self.height, self.width, 3 if self.rgb else 1), dtype=np.uint8)
@@ -141,34 +126,6 @@ class DataHandler:
                     return frame
 
         return frame
-
-
-    #Legacy, non più utilizzata
-    '''
-    def create_video_from_colors(self, colors):
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        out = cv2.VideoWriter(self.video_out, fourcc, self.fps, (self.width, self.height), isColor=bool(self.rgb))
-
-        total_pixels = self.width * self.height
-        num_blocks = math.ceil(len(colors) / (total_pixels // (self.block_size*self.block_size)))
-
-        m.set_string(self.stdscr, 5, 0, f"Creating video with {num_blocks} frames")
-
-        bitstream = iter(colors)
-
-        for frame_idx in range(num_blocks):
-            m.set_string(self.stdscr, 6, 0, f"Elaborating frame {frame_idx}/{num_blocks}")
-            frame = self.create_frame(bitstream)
-            
-            # Debug: Salva il frame come immagine per la verifica
-            # cv2.imwrite(f"frame_{frame_idx:04d}.png", frame)
-
-            frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR) if self.rgb else frame
-            out.write(frame)
-
-        out.release()
-        m.set_string(self.stdscr, 6, 0, f"Video saved as {self.video_out}", colorCode=2)
-    '''
 
     # Video to Data + needed functions
     def videoToData(self):
@@ -192,17 +149,14 @@ class DataHandler:
                 if not ret:
                     break
 
-                # Gestione del frame in scala di grigi se RGB è disabilitato
-                if not self.rgb:
-                    gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                else:
-                    gray_frame = frame  # Mantieni il frame come RGB
+                gray_frame = frame if self.rgb else cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
 
                 for y in range(0, self.height, self.block_size):
                     for x in range(0, self.width, self.block_size):
                         if self.rgb:
                             pixel = gray_frame[y, x]
-                            # Usa la media dei canali R, G e B per ottenere un valore unico
+
+                            # Mean from rgb to elaborate the value
                             pixel_value = np.mean(pixel)
                         else:
                             pixel_value = gray_frame[y, x]
@@ -221,7 +175,7 @@ class DataHandler:
 
                 currFrame += 1
 
-            # Gestione dei bit rimanenti (se presenti)
+            # Excess bits (if any)
             if bits:
                 byte = 0
                 for bit in bits:
@@ -233,59 +187,3 @@ class DataHandler:
             cap.release()
             cv2.destroyAllWindows()
             m.set_string(self.stdscr, 4, 0, f"Finished extracting bits and saved data to {self.zip_out}", colorCode=2, stop=True)
-
-
-#Legacy non più usate
-
-'''
-    def video_to_bits(self):
-        m.set_string(self.stdscr, 1, 0, f"Extracting bits from video")
-
-        cap = cv2.VideoCapture(self.video_in)
-        bits = []
-
-        currFrame = 1
-        while cap.isOpened():
-            m.set_string(self.stdscr, 2, 0, f"Reading bits from frame {currFrame}")
-
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-            for y in range(0, self.height, self.block_size):
-                for x in range(0, self.width, self.block_size):
-                    pixel = gray_frame[y, x]
-                    
-                    bits.append(1 if pixel > 128 else 0)
-
-            currFrame+=1
-
-        cap.release()
-        cv2.destroyAllWindows()
-
-        m.set_string(self.stdscr, 2, 0, f"Finished reading all bits in frames", colorCode=2)
-        return bits
-
-    def bits_to_bytes(self, bits):
-        m.set_string(self.stdscr, 3, 0, f"Converting {len(bits)} bits to bytes")
-
-        bytes_list = []
-        for i in range(0, len(bits), 8):
-            m.set_string(self.stdscr, 4, 0, f"Converting bits {i} - {i+8}")
-            byte = 0
-            for bit in bits[i:i+8]:
-                byte = (byte << 1) | bit
-            bytes_list.append(byte)
-
-        m.set_string(self.stdscr, 4, 0, f"Finished converting bits to bytes", colorCode=2)
-        
-        return bytes(bytes_list)
-
-    def save_zip(self, byte_data):
-        m.set_string(self.stdscr, 5, 0,f"Saving data to {self.zip_out}")
-        with open(self.zip_out, 'wb') as f:
-            f.write(byte_data)
-        m.set_string(self.stdscr, 5, 0,f"Finished saving data", colorCode=2, stop=True)
-'''
