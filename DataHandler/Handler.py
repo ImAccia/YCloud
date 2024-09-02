@@ -135,11 +135,13 @@ class DataHandler:
         self.stdscr.clear()
         m.set_string(self.stdscr, 1, 0, f"Extracting bits and saving them to {self.zip_out}")
 
+        buffer_size = 1024
+        buffer = bytearray()
+        
         with open(self.zip_out, 'wb') as zip_file:
             cap = cv2.VideoCapture(self.video_in)
             bits = []
-            currFrame = 1
-            total_bytes = 0
+            currFrame = 0
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
             while cap.isOpened():
@@ -149,17 +151,13 @@ class DataHandler:
                 if not ret:
                     break
 
-                gray_frame = frame if self.rgb else cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
-
                 for y in range(0, self.height, self.block_size):
                     for x in range(0, self.width, self.block_size):
                         if self.rgb:
-                            pixel = gray_frame[y, x]
-
-                            # Mean from rgb to elaborate the value
-                            pixel_value = np.mean(pixel)
+                            pixel = frame[y, x]
+                            pixel_value = np.mean(pixel) # fix, un colore = 3 byte
                         else:
-                            pixel_value = gray_frame[y, x]
+                            pixel_value = frame[y, x][0]
 
                         bit = 1 if pixel_value > 128 else 0
                         bits.append(bit)
@@ -168,10 +166,12 @@ class DataHandler:
                             byte = 0
                             for bit in bits:
                                 byte = (byte << 1) | bit
-                            zip_file.write(bytes([byte]))
+                            buffer.append(byte)
                             bits = []
-                            total_bytes += 1
-                            m.set_string(self.stdscr, 3, 0, f"Total bytes written: {total_bytes}")
+
+                            if len(buffer) >= buffer_size:
+                                zip_file.write(buffer)
+                                buffer.clear()
 
                 currFrame += 1
 
@@ -180,10 +180,11 @@ class DataHandler:
                 byte = 0
                 for bit in bits:
                     byte = (byte << 1) | bit
-                zip_file.write(bytes([byte]))
-                total_bytes += 1
-                m.set_string(self.stdscr, 3, 0, f"Total bytes written: {total_bytes}")
-
-            cap.release()
-            cv2.destroyAllWindows()
-            m.set_string(self.stdscr, 4, 0, f"Finished extracting bits and saved data to {self.zip_out}", colorCode=2, stop=True)
+                buffer.append(byte)
+            
+            if buffer:
+                zip_file.write(buffer)
+        
+        cap.release()
+        cv2.destroyAllWindows()
+        m.set_string(self.stdscr, 4, 0, f"Finished extracting bits and saved data to {self.zip_out}", colorCode=2, stop=True)
